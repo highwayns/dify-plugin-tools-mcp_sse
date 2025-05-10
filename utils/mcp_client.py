@@ -9,7 +9,34 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from httpx import Response
 from httpx_sse import connect_sse
+import jwt  # 需要安装 PyJWT
 
+class McpAuthClientMixin:
+    def __init__(self, login_url: str, username: str, password: str):
+        self.login_url = login_url
+        self.username = username
+        self.password = password
+        self.token = None
+
+    def authenticate(self) -> str:
+        """Authenticate to MCPHub and retrieve JWT token"""
+        response = httpx.post(
+            self.login_url,
+            headers={"Content-Type": "application/json"},
+            json={"username": self.username, "password": self.password},
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+        if "token" not in data:
+            raise Exception("MCPHub login failed: No token returned")
+        self.token = data["token"]
+        return self.token
+
+    def get_auth_headers(self) -> dict[str, str]:
+        if not self.token:
+            self.authenticate()
+        return {"Authorization": f"Bearer {self.token}"}
 
 class McpClient(ABC):
     """Interface for MCP client."""
@@ -50,7 +77,14 @@ class McpSseClient(McpClient):
         self.timeout = timeout
         self.sse_read_timeout = sse_read_timeout
         self.endpoint_url = None
-        self.client = httpx.Client(headers=headers)
+        #self.client = httpx.Client(headers=headers)
+        auth_headers = headers or {}
+        if isinstance(self, McpAuthClientMixin):
+            auth_headers = self.get_auth_headers()
+        if headers:
+            auth_headers.update(headers)  # headers 的优先级更高
+        self.client = httpx.Client(headers=auth_headers)
+
         self._request_id = 0
         self.message_queue = Queue()
         self.response_ready = Event()
@@ -208,6 +242,14 @@ class McpSseClient(McpClient):
             raise Exception(f"MCP Server tools/call error: {response['error']}")
         return response.get("result", {}).get("content", [])
 
+class SecureMcpSseClient(McpAuthClientMixin, McpSseClient):
+    def __init__(self, name, url, login_url, username, password,
+                 timeout=50, sse_read_timeout=50):
+        McpAuthClientMixin.__init__(self, login_url, username, password)
+        McpSseClient.__init__(self, name, url,
+                              headers=self.get_auth_headers(),
+                              timeout=timeout,
+                              sse_read_timeout=sse_read_timeout)
 
 class McpStreamableHttpClient(McpClient):
     """
@@ -221,8 +263,22 @@ class McpStreamableHttpClient(McpClient):
         self.name = name
         self.url = url
         self.timeout = timeout
-        self.client = httpx.Client(headers=headers)
-        self.session_id = None
+        auth_headers = headers or {}
+        if isinstance(self, McpAuthClientMixin):
+            auth_headers = self.get_auth_headers()
+        if headers:
+            auth_headers.update(headers)  # headers 的优先级更高
+        self.client = httpx.Client(headers=auth_headers)
+        self.session_id = None  # 初始化为空
+
+    def set_session_id_from_token(self, token: str):
+        """从JWT token中解析session_id（假设为payload中的'session_id'字段）"""
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            self.session_id = payload.get("session_id")
+        except Exception as e:
+            logging.warning(f"Failed to parse session_id from token: {e}")
+            self.session_id = None
 
     def close(self) -> None:
         try:
@@ -245,6 +301,9 @@ class McpStreamableHttpClient(McpClient):
         return response
 
     def initialize(self):
+        # 如果有token且未设置session_id，则尝试从token解析
+        if isinstance(self, McpAuthClientMixin) and self.token and not self.session_id:
+            self.set_session_id_from_token(self.token)
         init_data = {
             "jsonrpc": "2.0",
             "id": 0,
@@ -259,7 +318,7 @@ class McpStreamableHttpClient(McpClient):
             }
         }
         response = self.send_message(init_data)
-        self.session_id = response.headers.get("mcp-session-id", None)
+        # 不再从 response.headers 获取 session_id
         notify_data = {
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
@@ -296,6 +355,13 @@ class McpStreamableHttpClient(McpClient):
             raise Exception(f"MCP Server tools/call error: {response_data['error']}")
         return response_data.get("result", {}).get("content", [])
 
+class SecureMcpHttpClient(McpAuthClientMixin, McpStreamableHttpClient):
+    def __init__(self, name, url, login_url, username, password,
+                 timeout=50):
+        McpAuthClientMixin.__init__(self, login_url, username, password)
+        McpStreamableHttpClient.__init__(self, name, url,
+                                         headers=self.get_auth_headers(),
+                                         timeout=timeout)
 
 class McpClients:
     def __init__(self, servers_config: dict[str, Any]):
@@ -315,18 +381,24 @@ class McpClients:
         if "transport" in config:
             transport = config["transport"]
         if transport == "streamable_http":
-            return McpStreamableHttpClient(
+            return SecureMcpHttpClient(
                 name=name,
                 url=config.get("url"),
-                headers=config.get("headers", None),
+                #headers=config.get("headers", None),
                 timeout=config.get("timeout", 50),
+                login_url=config.get("login_url"),
+                username=config.get("login_user"),
+                password=config.get("login_password"),
             )
-        return McpSseClient(
+        return SecureMcpSseClient(
             name=name,
             url=config.get("url"),
-            headers=config.get("headers", None),
+            #headers=config.get("headers", None),
             timeout=config.get("timeout", 50),
             sse_read_timeout=config.get("sse_read_timeout", 50),
+            login_url=config.get("login_url"),
+            username=config.get("login_user"),
+            password=config.get("login_password"),
         )
 
     def fetch_tools(self) -> list[dict]:
@@ -373,3 +445,57 @@ class McpClients:
                 client.close()
             except Exception as e:
                 logging.error(e)
+
+if __name__ == "__main__":
+    # 示例参数，请根据实际情况修改
+    login_url = "http://localhost:3004/auth/login"
+    username = "admin"
+    password = "admin123"
+
+    print("Testing McpAuthClientMixin authentication...")
+    auth_client = McpAuthClientMixin(login_url, username, password)
+    try:
+        token = auth_client.authenticate()
+        print("Authentication successful. Token:", token)
+        headers = auth_client.get_auth_headers()
+        print("Auth headers:", headers)
+    except Exception as e:
+        print("Authentication failed:", str(e))
+
+    # 测试 McpClients
+    print("\nTesting McpClients...")
+    servers_config = {
+        "mcpServers": {
+            "local_server": {
+                "url": "http://localhost:3004/sse",
+                "login_url": login_url,
+                "login_user": username,
+                "login_password": password,
+                "transport": "sse",  # 或 "streamable_http"
+                "timeout": 30
+            }
+        }
+    }
+    try:
+        mcp_clients = McpClients(servers_config)
+        print("McpClients initialized successfully.")
+
+        # 获取工具列表
+        tools = mcp_clients.fetch_tools()
+        print(f"Fetched tools: {tools}")
+
+        # 如果有工具，尝试执行第一个工具
+        if tools:
+            tool_name = tools[0]["name"]
+            print(f"Executing tool: {tool_name}")
+            # 示例参数，根据实际工具调整
+            tool_args = {}
+            result = mcp_clients.execute_tool(tool_name, tool_args)
+            print(f"Tool execution result: {result}")
+        else:
+            print("No tools found on the server.")
+
+        mcp_clients.close()
+        print("McpClients closed successfully.")
+    except Exception as e:
+        print("McpClients test failed:", str(e))

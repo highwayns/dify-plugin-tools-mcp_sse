@@ -77,6 +77,21 @@ OR
     }
 }
 ```
+## mcphub test 
+```json
+{
+        "mcpServers": {
+            "local_server": {
+                "url": "http://localhost:3004/sse",
+                "login_url": "http://localhost:3004/auth/login",
+                "login_user": "admin",
+                "login_password": "admin123",
+                "transport": "sse",  
+                "timeout": 30
+            }
+        }
+    }
+```
 
 > **Note:** "transport" parameter as `sse` or `streamable_http`, default `sse`.
 
