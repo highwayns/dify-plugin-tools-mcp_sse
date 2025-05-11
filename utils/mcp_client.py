@@ -269,17 +269,7 @@ class McpStreamableHttpClient(McpClient):
         if headers:
             auth_headers.update(headers)  # headers 的优先级更高
         self.client = httpx.Client(headers=auth_headers)
-        self.session_id = None  # 初始化为空
-
-    def set_session_id_from_token(self, token: str):
-        """从JWT token中解析session_id（假设为payload中的'session_id'字段）"""
-        try:
-            payload = jwt.decode(token, options={"verify_signature": False})
-            self.session_id = payload.get("session_id")
-        except Exception as e:
-            logging.warning(f"Failed to parse session_id from token: {e}")
-            self.session_id = None
-
+        self.session_id = None  # 初始化为空    
     def close(self) -> None:
         try:
             self.client.close()
@@ -301,9 +291,6 @@ class McpStreamableHttpClient(McpClient):
         return response
 
     def initialize(self):
-        # 如果有token且未设置session_id，则尝试从token解析
-        if isinstance(self, McpAuthClientMixin) and self.token and not self.session_id:
-            self.set_session_id_from_token(self.token)
         init_data = {
             "jsonrpc": "2.0",
             "id": 0,
