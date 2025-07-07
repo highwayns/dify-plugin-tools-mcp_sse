@@ -435,7 +435,7 @@ class McpClients:
 
 if __name__ == "__main__":
     # 示例参数，请根据实际情况修改
-    login_url = "http://localhost:3004/auth/login"
+    login_url = "http://localhost:3004/api/auth/login"
     username = "admin"
     password = "admin123"
 

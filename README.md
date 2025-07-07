@@ -82,8 +82,8 @@ OR
 {
         "mcpServers": {
             "local_server": {
-                "url": "http://172.17.0.1:3004/sse",
-                "login_url": "http://172.17.0.1:3004/auth/login",
+                "url": "http://172.18.0.1:3004/sse",
+                "login_url": "http://172.18.0.1:3004/api/auth/login",
                 "login_user": "admin",
                 "login_password": "admin123",
                 "transport": "sse",  
@@ -92,6 +92,11 @@ OR
         }
     }
 ```
+> **Note:** "172.18.0.1" 需用ifconfig检测决定.具体方法如下
+ docker exec -it docker-plugin_daemon-1 bash
+ apt update
+ apt install net-tools
+ ifconfig
 
 > **Note:** "transport" parameter as `sse` or `streamable_http`, default `sse`.
 
