@@ -82,8 +82,8 @@ OR
 {
         "mcpServers": {
             "local_server": {
-                "url": "http://172.18.0.1:3004/sse",
-                "login_url": "http://172.18.0.1:3004/api/auth/login",
+                "url": "http://172.18.0.1:3000/sse",
+                "login_url": "http://172.18.0.1:3000/auth/login",
                 "login_user": "admin",
                 "login_password": "admin123",
                 "transport": "sse",  

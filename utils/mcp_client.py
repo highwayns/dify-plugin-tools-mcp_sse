@@ -435,7 +435,7 @@ class McpClients:
 
 if __name__ == "__main__":
     # 示例参数，请根据实际情况修改
-    login_url = "http://localhost:3004/api/auth/login"
+    login_url = "http://localhost:3000/auth/login"
     username = "admin"
     password = "admin123"
 
@@ -454,7 +454,7 @@ if __name__ == "__main__":
     servers_config = {
         "mcpServers": {
             "local_server": {
-                "url": "http://localhost:3004/sse",
+                "url": "http://localhost:3000/sse",
                 "login_url": login_url,
                 "login_user": username,
                 "login_password": password,
